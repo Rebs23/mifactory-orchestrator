@@ -83,7 +83,7 @@ async function generateBlueprint(task) {
   }).join('\n\n');
 
   const prompt = 'You are an agent orchestrator. Design a Blueprint JSON for this task. Always respond in English only.\n\nTASK: ' + task + '\n\nSERVICES:\n' + serviceList + '\n\nRULES:\n1. Use ONLY the listed services\n2. To reference previous node output use: "{{node_ID.output}}"\n3. To reference a specific field: "{{node_ID.output.fieldName}}"\n4. For spec/convert: documentText must be the scraped text field — use "{{node_X.output.text}}" NOT the full output object\n5. For contract/generate: always include projectName, clientName, freelancerName and amount as direct strings/numbers, NOT references\n6. Order nodes in logical sequence
-7. ONLY use scraping/scrape if the task EXPLICITLY mentions a URL to scrape. NEVER use scraping for creative, writing, or generative tasks.\n\nRespond ONLY with valid JSON:\n{\n  "task": "description",\n  "estimated_credits": number,\n  "nodes": [\n    {\n      "id": "node_1",\n      "service": "name",\n      "endpoint": "/endpoint",\n      "params": {},\n      "depends_on": [],\n      "description": "what it does"\n    }\n  ]\n}';
+7. ONLY use scraping/scrape if the task contains an explicit URL (starting with http). If there is no URL in the task, NEVER use scraping under any circumstance. Default to memory/store, spec/convert, or logic/verify for all other tasks.\n\nRespond ONLY with valid JSON:\n{\n  "task": "description",\n  "estimated_credits": number,\n  "nodes": [\n    {\n      "id": "node_1",\n      "service": "name",\n      "endpoint": "/endpoint",\n      "params": {},\n      "depends_on": [],\n      "description": "what it does"\n    }\n  ]\n}';
 
   const response = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
