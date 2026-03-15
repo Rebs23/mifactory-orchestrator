@@ -82,7 +82,40 @@ async function generateBlueprint(task) {
     return name + ':\n' + eps;
   }).join('\n\n');
 
-  const prompt = 'You are an agent orchestrator. Design a Blueprint JSON for this task. Always respond in English only.\n\nTASK: ' + task + '\n\nSERVICES:\n' + serviceList + '\n\nRULES:\n1. Use ONLY the listed services and ONLY the exact endpoints listed above\n2. To reference previous node output use: "{{node_ID.output}}"\n3. To reference a specific field: "{{node_ID.output.fieldName}}"\n4. For spec service: ALWAYS use endpoint "/spec/convert" (NEVER "/convert" alone). The documentText param MUST reference the scraping node output directly using "{{node_X.output.text}}" where node_X is the scraping node. NEVER reference a memory node output as documentText\n5. For contract/generate: always include projectName, clientName, freelancerName and amount as direct strings/numbers\n6. Order nodes in logical sequence\n7. ONLY use scraping/scrape if the task contains an explicit URL starting with http. If no URL in task, NEVER use scraping.\n8. CRITICAL: Every endpoint in your blueprint MUST exactly match one of the endpoints listed in SERVICES above. Double-check before responding.\n9. NEVER use spec/validate right after spec/convert in the same pipeline. Use logic-verifier/verify instead for validation.\n\n10. NEVER use memory/read in the same pipeline where data is already available from a previous node output. Use {{node_X.output}} directly instead.\n\n10. NEVER use memory/read in the same pipeline where data is already available from a previous node output. Use {{node_X.output}} directly instead.\n\n10. NEVER use memory/read in the same pipeline where data is already available from a previous node output. Use {{node_X.output}} directly instead.\n\n10. NEVER use memory/read in the same pipeline where data is already available from a previous node output. Use {{node_X.output}} directly instead.\n\nRespond ONLY with valid JSON:\n{\n  "task": "description",\n  "estimated_credits": number,\n  "nodes": [\n    {\n      "id": "node_1",\n      "service": "name",\n      "endpoint": "/endpoint",\n      "params": {},\n      "depends_on": [],\n      "description": "what it does"\n    }\n  ]\n}';9. NEVER use spec/validate right after spec/convert in the same pipeline. Use logic-verifier/verify instead for validation.\n10. NEVER use memory/read in the same pipeline where you already have data from a previous node output. Use {{node_X.output}} directly instead of reading from memory.\n\nRespond ONLY with valid JSON:\n{\n  "task": "description",\n  "estimated_credits": number,\n  "nodes": [\n    {\n      "id": "node_1",\n      "service": "name",\n      "endpoint": "/endpoint",\n      "params": {},\n      "depends_on": [],\n      "description": "what it does"\n    }\n  ]\n}';
+  const prompt = `You are an agent orchestrator. Design a Blueprint JSON for this task. Always respond in English only.
+
+TASK: ${task}
+
+SERVICES:
+${serviceList}
+
+RULES:
+1. Use ONLY the listed services and ONLY the exact endpoints listed above
+2. To reference previous node output use: "{{node_ID.output}}"
+3. To reference a specific field: "{{node_ID.output.fieldName}}"
+4. For spec service: ALWAYS use endpoint "/spec/convert" (NEVER "/convert" alone). The documentText param MUST reference the scraping node output directly using "{{node_X.output.text}}" where node_X is the scraping node. NEVER reference a memory node output as documentText
+5. For contract/generate: always include projectName, clientName, freelancerName and amount as direct strings/numbers
+6. Order nodes in logical sequence
+7. ONLY use scraping/scrape if the task contains an explicit URL starting with http. If no URL in task, NEVER use scraping.
+8. CRITICAL: Every endpoint in your blueprint MUST exactly match one of the endpoints listed in SERVICES above. Double-check before responding.
+9. NEVER use spec/validate right after spec/convert in the same pipeline. Use logic-verifier/verify instead for validation.
+10. NEVER use memory/read in the same pipeline where data is already available from a previous node output. Use {{node_X.output}} directly instead.
+
+Respond ONLY with valid JSON:
+{
+  "task": "description",
+  "estimated_credits": number,
+  "nodes": [
+    {
+      "id": "node_1",
+      "service": "name",
+      "endpoint": "/endpoint",
+      "params": {},
+      "depends_on": [],
+      "description": "what it does"
+    }
+  ]
+}`;
   const response = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 1000,
@@ -91,6 +124,52 @@ async function generateBlueprint(task) {
 
   const text = response.content[0].text.trim().replace(/```json|```/g, '').trim();
   return JSON.parse(text);
+}
+
+function computeBlueprintCredits(blueprint) {
+  if (!blueprint || !Array.isArray(blueprint.nodes)) return 0;
+  let total = 0;
+  for (const node of blueprint.nodes) {
+    const service = SERVICES[node.service];
+    if (!service) continue;
+    const endpointInfo = service.endpoints[node.endpoint];
+    if (!endpointInfo) continue;
+    total += endpointInfo.credits || 0;
+  }
+  return total;
+}
+
+function validateBlueprint(task, blueprint) {
+  if (!blueprint || !Array.isArray(blueprint.nodes)) {
+    return { ok: false, error: 'Blueprint missing nodes array' };
+  }
+
+  const urlInTask = /https?:\/\/\S+/i.test(task || '');
+
+  for (let i = 0; i < blueprint.nodes.length; i++) {
+    const node = blueprint.nodes[i];
+    const service = SERVICES[node.service];
+    if (!service) return { ok: false, error: `Unknown service: ${node.service}` };
+    const endpointInfo = service.endpoints[node.endpoint];
+    if (!endpointInfo) return { ok: false, error: `Unknown endpoint: ${node.service}${node.endpoint}` };
+
+    if (!urlInTask && node.service === 'scraping' && node.endpoint === '/scrape') {
+      return { ok: false, error: 'Scraping used without URL in task' };
+    }
+
+    if (node.service === 'spec' && node.endpoint === '/spec/convert') {
+      const doc = node.params && node.params.documentText;
+      const ok = typeof doc === 'string' && /\{\{node_\w+\.output\.text\}\}/.test(doc);
+      if (!ok) return { ok: false, error: 'spec/convert must use {{node_X.output.text}} from scraping output' };
+    }
+
+    const prev = blueprint.nodes[i - 1];
+    if (prev && prev.service === 'spec' && prev.endpoint === '/spec/convert' && node.service === 'spec' && node.endpoint === '/spec/validate') {
+      return { ok: false, error: 'spec/validate cannot be immediately after spec/convert; use logic-verifier/verify instead' };
+    }
+  }
+
+  return { ok: true };
 }
 
 async function executeNode(node, outputs, apiKey) {
@@ -113,13 +192,30 @@ async function executeNode(node, outputs, apiKey) {
     }
   }
 
-  const res = await fetch(service.baseUrl + node.endpoint, {
-    method: endpointInfo.method,
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-    body: JSON.stringify(resolvedParams),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let res;
+  try {
+    res = await fetch(service.baseUrl + node.endpoint, {
+      method: endpointInfo.method,
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify(resolvedParams),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
-  if (!res.ok) throw new Error(node.service + node.endpoint + ' returned ' + res.status);
+  if (!res.ok) {
+    let details = '';
+    try {
+      const text = await res.text();
+      details = text ? ` - ${text.slice(0, 500)}` : '';
+    } catch (_) {
+      details = '';
+    }
+    throw new Error(node.service + node.endpoint + ' returned ' + res.status + details);
+  }
   return await res.json();
 }
 
@@ -155,6 +251,9 @@ app.post('/orchestrate', async (req, res) => {
   if (!task) return res.status(400).json({ error: 'Missing task' });
   try {
     const blueprint = await generateBlueprint(task);
+    const validation = validateBlueprint(task, blueprint);
+    if (!validation.ok) return res.status(400).json({ error: 'Invalid blueprint', details: validation.error });
+    blueprint.estimated_credits = computeBlueprintCredits(blueprint);
     res.json({ blueprint });
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate blueprint', details: err.message });
@@ -165,7 +264,13 @@ app.post('/execute', authenticate, async (req, res) => {
   const { blueprint } = req.body;
   if (!blueprint || !blueprint.nodes) return res.status(400).json({ error: 'Missing blueprint' });
   try {
-    await deductCredits(req.apiKey, req.keyData, 10);
+    const validation = validateBlueprint(blueprint.task, blueprint);
+    if (!validation.ok) return res.status(400).json({ error: 'Invalid blueprint', details: validation.error });
+    const totalCredits = computeBlueprintCredits(blueprint);
+    if (req.keyData.credits < totalCredits) {
+      return res.status(402).json({ error: `Insufficient credits. Need ${totalCredits}.` });
+    }
+    await deductCredits(req.apiKey, req.keyData, totalCredits);
     const results = await executeBlueprint(blueprint, req.apiKey);
     const success = results.filter(r => r.status === 'success').length;
     const failed = results.filter(r => r.status === 'error').length;
