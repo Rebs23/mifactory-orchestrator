@@ -236,8 +236,16 @@ async function executeBlueprint(blueprint, apiKey) {
   return results;
 }
 
+function buildInfo() {
+  return {
+    version: '2.0.2',
+    build: process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || 'unknown',
+  };
+}
+
 app.get('/', (req, res) => {
-  res.json({ service: 'mifactory-orchestrator', status: 'live', version: '2.0.2' });
+  const info = buildInfo();
+  res.json({ service: 'mifactory-orchestrator', status: 'live', version: info.version, build: info.build });
 });
 
 app.get('/ui', (req, res) => {
@@ -298,11 +306,13 @@ app.post('/mas-factory', authenticate, async (req, res) => {
 module.exports = app;
 
 app.get('/mcp', (req, res) => {
+  const info = buildInfo();
   res.json({
     schema_version: '1.0',
     name: 'mifactory-orchestrator',
     description: 'MAS-Factory — Vibe Graphing orchestrator that chains MCP servers from plain English descriptions',
-    version: '2.0.2',
+    version: info.version,
+    build: info.build,
     tools: [
       { name: 'orchestrate', description: 'Generate a blueprint JSON from a natural language task', input_schema: { type: 'object', properties: { task: { type: 'string', description: 'Task description in natural language' } }, required: ['task'] } },
       { name: 'execute', description: 'Execute an approved blueprint', input_schema: { type: 'object', properties: { blueprint: { type: 'object' } }, required: ['blueprint'] } },
@@ -312,8 +322,9 @@ app.get('/mcp', (req, res) => {
 });
 
 app.get('/.well-known/mcp/server-card.json', (req, res) => {
+  const info = buildInfo();
   res.json({
-    serverInfo: { name: 'mifactory-orchestrator', version: '2.0.2' },
+    serverInfo: { name: 'mifactory-orchestrator', version: info.version, build: info.build },
     authentication: { required: true },
     tools: [
       { name: 'orchestrate', description: 'Generate a blueprint from a natural language task', inputSchema: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
