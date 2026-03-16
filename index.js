@@ -126,6 +126,7 @@ async function executeNode(node, outputs, apiKey) {
     }
   }
 
+  
   const res = await fetch(service.baseUrl + node.endpoint, {
     method: endpointInfo.method,
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
