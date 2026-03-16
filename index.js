@@ -126,12 +126,10 @@ async function executeNode(node, outputs, apiKey) {
     }
   }
 
-  
-  const res = await fetch(service.baseUrl + node.endpoint, {
-    method: endpointInfo.method,
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-    body: JSON.stringify(resolvedParams),
-  });
+  // Truncar documentText si es muy largo para evitar overflow en spec/convert
+  if (resolvedParams.documentText && resolvedParams.documentText.length > 3000) {
+    resolvedParams.documentText = resolvedParams.documentText.substring(0, 3000);
+  }
 
   if (!res.ok) {
     const details = await res.text().catch(() => '');
