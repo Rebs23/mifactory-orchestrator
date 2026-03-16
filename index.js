@@ -126,9 +126,13 @@ async function executeNode(node, outputs, apiKey) {
     }
   }
 
-  // Truncar documentText si es muy largo
-  if (resolvedParams.documentText && resolvedParams.documentText.length > 3000) {
-    resolvedParams.documentText = resolvedParams.documentText.substring(0, 3000);
+  // Limpiar y truncar documentText
+  if (resolvedParams.documentText) {
+    resolvedParams.documentText = resolvedParams.documentText
+      .replace(/[^\x20-\x7E\n]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 2000);
   }
 
   const fetchRes = await fetch(service.baseUrl + node.endpoint, {
