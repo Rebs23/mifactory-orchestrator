@@ -156,6 +156,11 @@ app.post('/orchestrate', async (req, res) => {
   if (!task) return res.status(400).json({ error: 'Missing task' });
   try {
     const blueprint = await generateBlueprint(task);
+<<<<<<< HEAD
+=======
+    const validation = validateBlueprint(task, blueprint);
+    blueprint.estimated_credits = computeBlueprintCredits(blueprint);
+>>>>>>> 72644ec117b69ae10c45ffe7f2406123e94b969b
     res.json({ blueprint });
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate blueprint', details: err.message });
