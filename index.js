@@ -18,32 +18,6 @@ const redis = new Redis({
 });
 
 const SERVICES = {
-  news: {
-    baseUrl: 'https://gnews.io',
-    endpoints: {
-      '/api/v4/search': { method: 'GET', credits: 1, params: ['q'] },
-      '/api/v4/top-headlines': { method: 'GET', credits: 1, params: [] },
-    },
-  },
-  news_backup: {
-    baseUrl: 'https://serpapi.com',
-    endpoints: {
-      '/search.json': { method: 'GET', credits: 1, params: ['q'] },
-    },
-  },
-  weather: {
-    baseUrl: 'https://api.openweathermap.org',
-    endpoints: {
-      '/geo/1.0/direct': { method: 'GET', credits: 1, params: ['q'] },
-      '/data/3.0/onecall': { method: 'GET', credits: 1, params: ['lat', 'lon'] },
-    },
-  },
-  flights: {
-    baseUrl: 'https://test.api.amadeus.com',
-    endpoints: {
-      '/v2/shopping/flight-offers': { method: 'GET', credits: 2, params: ['originLocationCode', 'destinationLocationCode', 'departureDate', 'adults'] },
-    },
-  },
   scraping: {
     baseUrl: 'https://scraping-api-alpha.vercel.app',
     endpoints: {
@@ -126,9 +100,6 @@ RULES:
 8. CRITICAL: Every endpoint in your blueprint MUST exactly match one of the endpoints listed in SERVICES above. Double-check before responding.
 9. NEVER use spec/validate right after spec/convert in the same pipeline. Use logic-verifier/verify instead for validation.
 10. NEVER use memory/read in the same pipeline where data is already available from a previous node output. Use {{node_X.output}} directly instead.
-11. For weather: if user provides a city name, first call /geo/1.0/direct to get lat/lon, then call /data/3.0/onecall with lat/lon.
-12. For flights: use /v2/shopping/flight-offers with originLocationCode, destinationLocationCode, departureDate (YYYY-MM-DD), and adults.
-13. For news: use news /api/v4/search or /api/v4/top-headlines. Use news_backup /search.json ONLY as fallback.
 
 Respond ONLY with valid JSON:
 {
@@ -182,12 +153,6 @@ function validateBlueprint(task, blueprint) {
     const endpointInfo = service.endpoints[node.endpoint];
     if (!endpointInfo) return { ok: false, error: `Unknown endpoint: ${node.service}${node.endpoint}` };
 
-    for (const param of endpointInfo.params || []) {
-      if (!node.params || node.params[param] === undefined || node.params[param] === null || node.params[param] === '') {
-        return { ok: false, error: `Missing required param "${param}" for ${node.service}${node.endpoint}` };
-      }
-    }
-
     if (!urlInTask && node.service === 'scraping' && node.endpoint === '/scrape') {
       return { ok: false, error: 'Scraping used without URL in task' };
     }
@@ -205,62 +170,6 @@ function validateBlueprint(task, blueprint) {
   }
 
   return { ok: true };
-}
-
-let amadeusTokenCache = { token: null, expiresAt: 0 };
-
-async function getAmadeusToken() {
-  const now = Date.now();
-  if (amadeusTokenCache.token && amadeusTokenCache.expiresAt > now + 30000) {
-    return amadeusTokenCache.token;
-  }
-  const clientId = process.env.AMADEUS_API_KEY;
-  const clientSecret = process.env.AMADEUS_API_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error('Missing AMADEUS_API_KEY or AMADEUS_API_SECRET');
-  }
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-  });
-  const res = await fetch('https://test.api.amadeus.com/v1/security/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error('Amadeus auth failed: ' + res.status + (text ? ' - ' + text.slice(0, 300) : ''));
-  }
-  const data = await res.json();
-  amadeusTokenCache = { token: data.access_token, expiresAt: now + (data.expires_in || 0) * 1000 };
-  return data.access_token;
-}
-
-function applyServiceAuth(serviceName, endpoint, params, headers) {
-  if (serviceName === 'news') {
-    const token = process.env.GNEWS_API_KEY;
-    if (!token) throw new Error('Missing GNEWS_API_KEY');
-    params.token = token;
-  }
-  if (serviceName === 'news_backup') {
-    const apiKey = process.env.SERPAPI_API_KEY;
-    if (!apiKey) throw new Error('Missing SERPAPI_API_KEY');
-    params.api_key = apiKey;
-    params.engine = params.engine || 'google_news';
-  }
-  if (serviceName === 'weather') {
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    if (!apiKey) throw new Error('Missing OPENWEATHER_API_KEY');
-    params.appid = apiKey;
-  }
-  if (serviceName === 'flights') {
-    return getAmadeusToken().then(token => {
-      headers.Authorization = 'Bearer ' + token;
-    });
-  }
-  return null;
 }
 
 async function executeNode(node, outputs, apiKey) {
@@ -283,28 +192,16 @@ async function executeNode(node, outputs, apiKey) {
     }
   }
 
-  const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['x-api-key'] = apiKey;
-
-  const authPromise = applyServiceAuth(node.service, node.endpoint, resolvedParams, headers);
-  if (authPromise) await authPromise;
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   let res;
   try {
-    if (endpointInfo.method === 'GET') {
-      const url = new URL(service.baseUrl + node.endpoint);
-      Object.entries(resolvedParams).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-      res = await fetch(url.toString(), { method: 'GET', headers, signal: controller.signal });
-    } else {
-      res = await fetch(service.baseUrl + node.endpoint, {
-        method: endpointInfo.method,
-        headers,
-        body: JSON.stringify(resolvedParams),
-        signal: controller.signal,
-      });
-    }
+    res = await fetch(service.baseUrl + node.endpoint, {
+      method: endpointInfo.method,
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify(resolvedParams),
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }
