@@ -126,18 +126,22 @@ async function executeNode(node, outputs, apiKey) {
     }
   }
 
-  // Truncar documentText si es muy largo para evitar overflow en spec/convert
+  // Truncar documentText si es muy largo
   if (resolvedParams.documentText && resolvedParams.documentText.length > 3000) {
     resolvedParams.documentText = resolvedParams.documentText.substring(0, 3000);
   }
 
-  if (!res.ok) {
-    const details = await res.text().catch(() => '');
-    throw new Error(node.service + node.endpoint + ' returned ' + res.status + ' ' + details);
+  const fetchRes = await fetch(service.baseUrl + node.endpoint, {
+    method: endpointInfo.method,
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify(resolvedParams),
+  });
+  if (!fetchRes.ok) {
+    const details = await fetchRes.text().catch(() => '');
+    throw new Error(node.service + node.endpoint + ' returned ' + fetchRes.status + ' ' + details);
   }
-  return await res.json();
+  return await fetchRes.json();
 }
-
 async function executeBlueprint(blueprint, apiKey) {
   const outputs = {};
   const results = [];
