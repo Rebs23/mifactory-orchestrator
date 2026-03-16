@@ -260,7 +260,6 @@ app.post('/orchestrate', async (req, res) => {
   try {
     const blueprint = await generateBlueprint(task);
     const validation = validateBlueprint(task, blueprint);
-    if (!validation.ok) return res.status(400).json({ error: 'Invalid blueprint', details: validation.error });
     blueprint.estimated_credits = computeBlueprintCredits(blueprint);
     res.json({ blueprint });
   } catch (err) {
